@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0065BD" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="TUM Rooms" />
+  <title>TUM Free Rooms — Find nearby open rooms</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
+  <link rel="apple-touch-icon" href="./icons/icon.svg" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="topbar-row">
+        <div class="brand">
+          <img src="./icons/icon.svg" alt="" class="brand-icon" width="32" height="32" />
+          <div>
+            <h1 class="brand-title">TUM Free Rooms</h1>
+            <p class="brand-sub" id="locationBadge">Location: Stammgelände</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" id="gpsBtn" class="btn btn-primary" title="Use your GPS location">
+            <span aria-hidden="true">📍</span>
+            <span>Use GPS</span>
+          </button>
+          <button type="button" id="themeBtn" class="btn btn-icon" aria-label="Toggle light/dark theme" title="Toggle theme">
+            ◐
+          </button>
+        </div>
+      </div>
+
+      <div id="farBanner" class="far-banner hidden" role="status">
+        <span id="farBannerText"></span>
+        <div class="far-banner-actions">
+          <button type="button" class="chip-mini" data-far-campus="stammgelaende">Stammgelände</button>
+          <button type="button" class="chip-mini" data-far-campus="garching">Garching</button>
+          <button type="button" class="chip-mini" data-far-campus="wzw">Weihenstephan</button>
+          <button type="button" id="dismissFarBtn" class="chip-mini chip-ghost" aria-label="Dismiss notice">✕</button>
+        </div>
+      </div>
+
+      <div class="campus-strip" id="campusStrip" aria-label="TUM campuses"></div>
+
+      <div class="controls-panel">
+        <div class="time-row">
+          <div class="quick-times" role="group" aria-label="Quick time">
+            <button type="button" class="pill-btn active" data-offset="0">Now</button>
+            <button type="button" class="pill-btn" data-offset="30">+30m</button>
+            <button type="button" class="pill-btn" data-offset="60">+1h</button>
+            <button type="button" class="pill-btn" data-offset="120">+2h</button>
+          </div>
+          <div class="datetime-inputs">
+            <input type="date" id="dateInput" aria-label="Date (Munich time)" />
+            <input type="time" id="timeInput" aria-label="Time (Munich time)" />
+          </div>
+        </div>
+
+        <div class="search-row">
+          <div class="search-box">
+            <span class="search-icon" aria-hidden="true">🔎</span>
+            <input
+              type="search"
+              id="searchInput"
+              placeholder="Search room, code (e.g. 0509.EG.980, MI HS 1) or building..."
+              autocomplete="off"
+            />
+            <button type="button" id="clearSearchBtn" class="clear-btn hidden" aria-label="Clear search">✕</button>
+          </div>
+          <button type="button" id="toggleFiltersBtn" class="btn btn-secondary" aria-expanded="false" aria-controls="advancedFilters">
+            Filters <span id="activeFiltersCount" class="badge-count hidden"></span>
+          </button>
+        </div>
+
+        <div id="advancedFilters" class="advanced-filters hidden">
+          <div class="filter-group">
+            <span class="filter-label">Room status</span>
+            <div class="segmented" id="statusFilterGroup">
+              <button type="button" class="seg-btn active" data-status="free">Free only</button>
+              <button type="button" class="seg-btn" data-status="soon">Free + ≤30m</button>
+              <button type="button" class="seg-btn" data-status="all">All</button>
+            </div>
+          </div>
+
+          <div class="filter-group">
+            <span class="filter-label">Free for at least</span>
+            <div class="segmented" id="durationFilterGroup">
+              <button type="button" class="seg-btn active" data-min="0">Any</button>
+              <button type="button" class="seg-btn" data-min="30">≥ 30m</button>
+              <button type="button" class="seg-btn" data-min="60">≥ 1h</button>
+              <button type="button" class="seg-btn" data-min="120">≥ 2h</button>
+            </div>
+          </div>
+
+          <div class="filter-group">
+            <span class="filter-label">Room types</span>
+            <div class="usage-chips" id="usageChips"></div>
+          </div>
+
+          <label class="checkbox-row">
+            <input type="checkbox" id="onlyActiveTodayCheck" />
+            <span>Only rooms with ≥1 event today</span>
+            <span class="hint-inline" title="Helps filter out locked or unscheduled rooms">(?)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="mobile-tabs" role="tablist" aria-label="Results view">
+        <button type="button" role="tab" id="tabListBtn" class="tab-btn active" aria-selected="true">
+          Rooms list
+        </button>
+        <button type="button" role="tab" id="tabMapBtn" class="tab-btn" aria-selected="false">
+          Map
+        </button>
+      </div>
+    </header>
+
+    <main class="main-layout" id="mainLayout" data-mobile-view="list">
+      <section class="list-pane" id="listPane" aria-label="Rooms list">
+        <div class="summary-bar">
+          <span id="summaryText">Loading TUM room catalog...</span>
+          <span id="fetchStatusText" class="fetch-status"></span>
+        </div>
+
+        <div id="errorBanner" class="error-banner hidden" role="alert"></div>
+        <div id="roomsList" class="rooms-list"></div>
+
+        <div class="load-more-wrap hidden" id="loadMoreWrap">
+          <button type="button" id="loadMoreBtn" class="btn btn-secondary btn-full">
+            Load 30 more rooms
+          </button>
+        </div>
+      </section>
+
+      <section class="map-pane" id="mapPane" aria-label="Campus and rooms map">
+        <div class="map-toolbar">
+          <button type="button" id="pickPinBtn" class="btn btn-secondary btn-sm">
+            🎯 Move pin on map
+          </button>
+          <span class="map-legend">
+            <i class="dot dot-free"></i> Free
+            <i class="dot dot-soon"></i> ≤30m
+            <i class="dot dot-busy"></i> Busy
+          </span>
+        </div>
+        <div id="mapContainer" class="map-container"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="drawerBackdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
+  <aside id="roomDrawer" class="room-drawer hidden" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+    <div class="drawer-handle" aria-hidden="true"></div>
+    <div class="drawer-header">
+      <div>
+        <div class="drawer-kicker" id="drawerKicker"></div>
+        <h2 class="drawer-title" id="drawerTitle"></h2>
+        <p class="drawer-subtitle" id="drawerSubtitle"></p>
+      </div>
+      <button type="button" id="closeDrawerBtn" class="btn btn-icon" aria-label="Close details">✕</button>
+    </div>
+
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "TUM Free Rooms",
+  "short_name": "TUM Rooms",
+  "description": "Find the nearest free rooms across TUM campuses with live schedules from NavigaTUM.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#0065BD",
+  "background_color": "#f4f7fb",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

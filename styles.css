@@ -356,6 +356,9 @@ input {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  max-height: 36dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .filter-group {
@@ -621,6 +624,80 @@ input {
   font-size: 0.74rem;
   font-weight: 600;
   color: var(--text);
+}
+
+.access-tag {
+  border-radius: 6px;
+  padding: 1px 7px;
+  font-size: 0.73rem;
+  font-weight: 700;
+}
+
+.access-public {
+  background: var(--free-bg);
+  color: var(--free);
+}
+
+.access-school {
+  background: var(--soon-bg);
+  color: var(--soon);
+}
+
+.access-chair {
+  background: var(--busy-bg);
+  color: var(--busy);
+}
+
+.fav-star {
+  color: #eab308;
+  margin-right: 4px;
+}
+
+.checkbox-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.hidden-rooms-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.drawer-personal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.btn-warn {
+  background: var(--busy-bg);
+  border-color: rgba(220, 38, 38, 0.28);
+  color: var(--busy);
+}
+
+.btn-fav-active {
+  background: rgba(234, 179, 8, 0.16);
+  border-color: rgba(234, 179, 8, 0.45);
+  color: #b45309;
+}
+
+:root[data-theme="dark"] .btn-fav-active {
+  color: #facc15;
 }
 
 .card-subinfo {

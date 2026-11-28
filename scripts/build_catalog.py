@@ -28,8 +28,53 @@ USAGES = [
 ROOT_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_PATH = ROOT_DIR / "data" / "rooms.json"
 
+PUBLIC_OPERATOR_CODES = {
+    "TUZVZA4",  # Immobilien (ZA 4) — central TUM lecture halls & classrooms
+    "TUZEBIB",  # Universitätsbibliothek — library reading/study rooms
+    "TUVBSBV",  # Studentische Vertretung — student council study rooms
+    "TUCS000",  # TUM Campus Straubing
+    "TUCSVRW",  # TUMCS Office
+    "TUWIH01",  # TUM Campus Heilbronn
+}
+
+CHAIR_KEYWORDS = (
+    "lehrstuhl",
+    "professur",
+    "museum",
+    "design factory",
+    "werkfeuerwehr",
+    "core facility",
+    "greenhouses",
+)
+
+SCHOOL_KEYWORDS = (
+    "tum school",
+    "department of",
+    "fakultät",
+    "school office",
+    "studienverwaltung",
+    "sprachenzentrum",
+    "dekanat",
+)
+
 _thread_local = threading.local()
 _ROOM_ERR_RE = re.compile(r"(?:Room|Requested id)\s+([^\s/]+)")
+
+
+def classify_access(op_code: str, op_name: str) -> str:
+    """Classifies likely student access level based on NavigaTUM operator metadata."""
+    code = (op_code or "").strip().upper()
+    name_l = (op_name or "").strip().lower()
+
+    if code in PUBLIC_OPERATOR_CODES or any(
+        k in name_l for k in ("immobilien (za 4)", "universitätsbibliothek", "studentische vertretung")
+    ):
+        return "public"
+    if any(k in name_l for k in CHAIR_KEYWORDS):
+        return "chair"
+    if any(k in name_l for k in SCHOOL_KEYWORDS):
+        return "school"
+    return "chair"
 
 
 def get_session() -> requests.Session:
@@ -147,6 +192,10 @@ def fetch_room_detail(room_id: str, fallback_usage: str) -> dict | None:
     id_parts = rid.split(".")
     floor_code = id_parts[1] if len(id_parts) >= 2 else ""
 
+    op = props.get("operator") or {}
+    op_code = (op.get("code") or "").strip()
+    op_name = (op.get("name") or "").strip()
+
     return {
         "id": rid,
         "name": loc.get("name") or rid,
@@ -162,6 +211,9 @@ def fetch_room_detail(room_id: str, fallback_usage: str) -> dict | None:
         "lat": round(float(lat), 5),
         "lon": round(float(lon), 5),
         "cal_url": cal_url,
+        "op_code": op_code,
+        "op_name": op_name,
+        "access": classify_access(op_code, op_name),
     }
 
 
@@ -253,6 +305,7 @@ def main() -> None:
     size_kb = OUTPUT_PATH.stat().st_size / 1024
     by_campus = Counter(r["campus_id"] for r in verified_rooms)
     by_usage = Counter(r["usage"] for r in verified_rooms)
+    by_access = Counter(r["access"] for r in verified_rooms)
 
     print("\n=== CATALOG SUMMARY ===")
     print(f"Found on /api/search:        {len(discovered)}")
@@ -260,6 +313,7 @@ def main() -> None:
     print(f"With verified calendar:      {len(verified_rooms)}")
     print(f"Output saved:                {OUTPUT_PATH} ({size_kb:.1f} KB)")
     print(f"Total time:                  {time.time() - started:.1f}s")
+    print("By access:", dict(by_access.most_common()))
     print("By campus:", dict(by_campus.most_common()))
     print("By usage:", dict(by_usage.most_common()))
 

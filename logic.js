@@ -25,6 +25,31 @@ export const USAGES_META = {
   'EDV-Raum': { label: 'Computer lab', de: 'EDV-Raum', defaultOn: true },
 };
 
+export const ACCESS_META = {
+  public: { label: 'Public / Central', cls: 'access-public' },
+  school: { label: 'School / Dept', cls: 'access-school' },
+  chair: { label: 'Chair / Restricted', cls: 'access-chair' },
+};
+
+export function formatOperatorShort(room) {
+  const code = (room?.op_code || '').trim().toUpperCase();
+  if (code === 'TUZVZA4') return 'Central (ZA 4)';
+  if (code === 'TUZEBIB') return 'Library';
+  if (code === 'TUVBSBV') return 'Student Council';
+  if (code === 'TUCS000' || code === 'TUCSVRW') return 'Campus Straubing';
+  if (code === 'TUWIH01') return 'Campus Heilbronn';
+  if (room?.access === 'school') return 'School / Dept';
+  if (room?.access === 'public') return 'Public / Central';
+  return 'Chair / Restricted';
+}
+
+export function matchesAccessFilter(room, accessFilter) {
+  const acc = room?.access || 'chair';
+  if (accessFilter === 'public') return acc === 'public';
+  if (accessFilter === 'public_school') return acc === 'public' || acc === 'school';
+  return true;
+}
+
 const BERLIN_TZ = 'Europe/Berlin';
 
 const berlinPartsFormatter = new Intl.DateTimeFormat('en-CA', {

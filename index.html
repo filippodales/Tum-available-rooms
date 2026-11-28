@@ -85,6 +85,15 @@
 
         <div id="advancedFilters" class="advanced-filters hidden">
           <div class="filter-group">
+            <span class="filter-label">Access level</span>
+            <div class="segmented" id="accessFilterGroup">
+              <button type="button" class="seg-btn active" data-access="public">Public / Central</button>
+              <button type="button" class="seg-btn" data-access="public_school">+ School / Dept</button>
+              <button type="button" class="seg-btn" data-access="all">All (+ Chairs)</button>
+            </div>
+          </div>
+
+          <div class="filter-group">
             <span class="filter-label">Room status</span>
             <div class="segmented" id="statusFilterGroup">
               <button type="button" class="seg-btn active" data-status="free">Free only</button>
@@ -108,11 +117,22 @@
             <div class="usage-chips" id="usageChips"></div>
           </div>
 
-          <label class="checkbox-row">
-            <input type="checkbox" id="onlyActiveTodayCheck" />
-            <span>Only rooms with ≥1 event today</span>
-            <span class="hint-inline" title="Helps filter out locked or unscheduled rooms">(?)</span>
-          </label>
+          <div class="checkbox-stack">
+            <label class="checkbox-row">
+              <input type="checkbox" id="onlyActiveTodayCheck" />
+              <span>Only rooms with ≥1 event today</span>
+              <span class="hint-inline" title="Helps filter out locked or unscheduled rooms">(?)</span>
+            </label>
+            <label class="checkbox-row">
+              <input type="checkbox" id="onlyFavoritesCheck" />
+              <span>⭐ Favorites only</span>
+            </label>
+          </div>
+
+          <div id="hiddenRoomsRow" class="hidden-rooms-row hidden">
+            <span id="hiddenRoomsText">Hidden rooms: 0</span>
+            <button type="button" id="restoreHiddenBtn" class="chip-mini">Restore all</button>
+          </div>
         </div>
       </div>
 

@@ -1,15 +1,18 @@
 import {
+  ACCESS_META,
   CAMPUSES,
   USAGES_META,
   berlinLocalToUtcMs,
   computeRoomAvailability,
   formatDistance,
   formatDuration,
+  formatOperatorShort,
   formatUtcToBerlinDateLabel,
   formatUtcToBerlinHM,
   getBerlinDateTimeParts,
   getBerlinDayBoundsUtc,
   haversineMeters,
+  matchesAccessFilter,
   matchesMinDuration,
   translateEntryType,
 } from './logic.js';
@@ -18,6 +21,8 @@ const CALENDAR_API_URL = 'https://nav.tum.de/api/calendar';
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const BATCH_SIZE = 10;
 const MAX_CONCURRENCY = 4;
+const FAV_STORAGE_KEY = 'tum_fav_rooms';
+const HIDDEN_STORAGE_KEY = 'tum_hidden_rooms';
 
 const state = {
   rooms: [],
@@ -29,10 +34,14 @@ const state = {
   timeStr: '',
   quickOffsetMin: 0,
   searchQuery: '',
+  accessFilter: 'public', // 'public' | 'public_school' | 'all'
   statusFilter: 'free', // 'free' | 'soon' | 'all'
   minDurationMin: 0,
   selectedUsages: new Set(Object.keys(USAGES_META)),
   onlyActiveToday: false,
+  onlyFavorites: false,
+  favoriteIds: new Set(),
+  hiddenIds: new Set(),
   loadLimit: 40,
   mobileView: 'list',
   pickingPin: false,
@@ -66,6 +75,10 @@ const els = {
   advancedFilters: document.getElementById('advancedFilters'),
   usageChips: document.getElementById('usageChips'),
   onlyActiveTodayCheck: document.getElementById('onlyActiveTodayCheck'),
+  onlyFavoritesCheck: document.getElementById('onlyFavoritesCheck'),
+  hiddenRoomsRow: document.getElementById('hiddenRoomsRow'),
+  hiddenRoomsText: document.getElementById('hiddenRoomsText'),
+  restoreHiddenBtn: document.getElementById('restoreHiddenBtn'),
   tabListBtn: document.getElementById('tabListBtn'),
   tabMapBtn: document.getElementById('tabMapBtn'),
   mainLayout: document.getElementById('mainLayout'),
@@ -174,14 +187,47 @@ function renderUsageChips() {
     .join('');
 }
 
+function loadIdSet(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveIdSet(storageKey, idSet) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify([...idSet]));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 function updateActiveFiltersBadge() {
   let count = 0;
+  if (state.accessFilter !== 'public') count += 1;
   if (state.statusFilter !== 'free') count += 1;
   if (state.minDurationMin > 0) count += 1;
   if (state.selectedUsages.size < Object.keys(USAGES_META).length) count += 1;
   if (state.onlyActiveToday) count += 1;
+  if (state.onlyFavorites) count += 1;
   els.activeFiltersCount.textContent = String(count);
   els.activeFiltersCount.classList.toggle('hidden', count === 0);
+
+  const hiddenCount = state.hiddenIds.size;
+  els.hiddenRoomsText.textContent = `Hidden rooms: ${hiddenCount}`;
+  els.hiddenRoomsRow.classList.toggle('hidden', hiddenCount === 0);
+}
+
+function setAccessFilter(nextFilter) {
+  state.accessFilter = nextFilter;
+  document.querySelectorAll('#accessFilterGroup .seg-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.access === nextFilter);
+  });
+  updateActiveFiltersBadge();
+  refreshScheduleAndRender();
 }
 
 function selectCampus(campusId) {
@@ -217,9 +263,12 @@ function getFilteredRoomsSorted() {
   const q = state.searchQuery.trim().toLowerCase();
   const list = [];
   for (const r of state.rooms) {
+    if (state.hiddenIds.has(r.id)) continue;
+    if (!matchesAccessFilter(r, state.accessFilter)) continue;
+    if (state.onlyFavorites && !state.favoriteIds.has(r.id)) continue;
     if (!state.selectedUsages.has(r.usage)) continue;
     if (q) {
-      const hay = `${r.id} ${r.name} ${r.short_name} ${r.arch} ${r.building} ${r.campus}`.toLowerCase();
+      const hay = `${r.id} ${r.name} ${r.short_name} ${r.arch} ${r.building} ${r.campus} ${r.op_name || ''}`.toLowerCase();
       if (!hay.includes(q)) continue;
     }
     const dist = haversineMeters(state.refLat, state.refLon, r.lat, r.lon);
@@ -486,10 +535,21 @@ function renderResults(sortedRooms, candidates) {
     if (state.isFetching) {
       els.roomsList.innerHTML = Array.from({ length: 4 }, () => '<div class="skeleton-card"></div>').join('');
     } else {
+      const expandBtn =
+        state.accessFilter === 'public'
+          ? '<button type="button" class="btn btn-secondary btn-sm" data-expand-access="public_school">Include School / Dept rooms</button>'
+          : state.accessFilter === 'public_school'
+          ? '<button type="button" class="btn btn-secondary btn-sm" data-expand-access="all">Include Chair rooms</button>'
+          : '';
+      const restoreBtn =
+        state.hiddenIds.size > 0
+          ? `<button type="button" class="btn btn-secondary btn-sm" data-restore-hidden="1">Restore ${state.hiddenIds.size} hidden</button>`
+          : '';
       els.roomsList.innerHTML = `
         <div class="empty-state">
-          <p><strong>No rooms found</strong> with the selected filters among the ${candidates.length} nearest rooms.</p>
-          <p>Try including "Free + ≤30m", changing the time, or loading more rooms.</p>
+          <p><strong>No rooms found</strong> with the selected filters among ${candidates.length} nearby candidates.</p>
+          <p>Try including School / Dept rooms, switching status to "Free + ≤30m", or changing the time.</p>
+          ${expandBtn || restoreBtn ? `<div class="empty-actions">${expandBtn}${restoreBtn}</div>` : ''}
         </div>
       `;
     }
@@ -503,6 +563,10 @@ function renderResults(sortedRooms, candidates) {
       const { room, avail } = item;
       const st = describeCardStatus(avail);
       const usageInfo = USAGES_META[room.usage]?.label || room.usage;
+      const accessMeta = ACCESS_META[room.access || 'chair'] || ACCESS_META.chair;
+      const operatorShort = formatOperatorShort(room);
+      const isFav = state.favoriteIds.has(room.id);
+      const favIcon = isFav ? '<span class="fav-star" title="Favorite">★</span>' : '';
       const archInfo = room.arch ? ` • ${escapeHtml(room.arch)}` : '';
       const floorInfo = room.floor_code ? `<span class="floor-pill">${escapeHtml(room.floor_code)}</span>` : '';
       const eventsNote =
@@ -519,9 +583,10 @@ function renderResults(sortedRooms, candidates) {
               <span class="distance-pill">${escapeHtml(formatDistance(room.dist))}</span>
             </div>
           </div>
-          <h3 class="card-title">${escapeHtml(room.short_name)}</h3>
+          <h3 class="card-title">${favIcon}${escapeHtml(room.short_name)}</h3>
           <div class="card-meta">
             <span class="usage-tag">${escapeHtml(usageInfo)}</span>
+            <span class="access-tag ${accessMeta.cls}">${escapeHtml(operatorShort)}</span>
             <span>${escapeHtml(room.id)}${archInfo}</span>
             <span>• ${escapeHtml(room.building || room.campus)}</span>
             <span>• ${escapeHtml(eventsNote)}</span>
@@ -628,9 +693,23 @@ function openRoomDrawer(roomId) {
 
   const navUrl = `https://nav.tum.de/room/${encodeURIComponent(room.id)}`;
   const gmapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${room.lat},${room.lon}`;
+  const isFav = state.favoriteIds.has(room.id);
+  const isHidden = state.hiddenIds.has(room.id);
+  const hallTip =
+    room.usage === 'Hörsaal'
+      ? ' Tip: Large lecture halls may have only one unlocked entrance door.'
+      : '';
 
   els.drawerBody.innerHTML = `
     ${bannerHtml}
+    <div class="drawer-personal-actions">
+      <button type="button" class="btn ${isFav ? 'btn-fav-active' : 'btn-secondary'}" data-toggle-fav="${escapeHtml(room.id)}">
+        ${isFav ? '★ Favorited' : '⭐ Favorite'}
+      </button>
+      <button type="button" class="btn btn-warn" data-toggle-hide="${escapeHtml(room.id)}">
+        ${isHidden ? '🔓 Unhide room' : '🔒 Hide (PIN / Restricted)'}
+      </button>
+    </div>
     <div class="drawer-actions">
       <a class="action-link" href="${navUrl}" target="_blank" rel="noopener">🗺️ NavigaTUM</a>
       <a class="action-link" href="${gmapsUrl}" target="_blank" rel="noopener">🧭 Google Maps</a>
@@ -641,8 +720,9 @@ function openRoomDrawer(roomId) {
       <div class="timeline-list">${timelineHtml || '<p>No schedule data available.</p>'}</div>
     </div>
     <div class="drawer-footnote">
+      ${room.op_name ? `<div><strong>Managed by:</strong> ${escapeHtml(room.op_name)} (${escapeHtml(formatOperatorShort(room))})</div>` : ''}
       ${room.address ? `<div><strong>Address:</strong> ${escapeHtml(room.address)}</div>` : ''}
-      <div>${escapeHtml(scrapeInfo)} Some rooms may require keycard access or have last-minute bookings.</div>
+      <div>${escapeHtml(scrapeInfo)} Some rooms may require keycard/PIN access or have last-minute bookings.${hallTip}</div>
     </div>
   `;
 
@@ -849,6 +929,12 @@ function bindEvents() {
     els.toggleFiltersBtn.setAttribute('aria-expanded', String(!open));
   });
 
+  document.getElementById('accessFilterGroup').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-access]');
+    if (!btn) return;
+    setAccessFilter(btn.dataset.access);
+  });
+
   document.getElementById('statusFilterGroup').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-status]');
     if (!btn) return;
@@ -888,14 +974,69 @@ function bindEvents() {
     refreshScheduleAndRender();
   });
 
+  els.onlyFavoritesCheck.addEventListener('change', () => {
+    state.onlyFavorites = els.onlyFavoritesCheck.checked;
+    updateActiveFiltersBadge();
+    refreshScheduleAndRender();
+  });
+
+  els.restoreHiddenBtn.addEventListener('click', () => {
+    state.hiddenIds.clear();
+    saveIdSet(HIDDEN_STORAGE_KEY, state.hiddenIds);
+    updateActiveFiltersBadge();
+    refreshScheduleAndRender();
+  });
+
   els.loadMoreBtn.addEventListener('click', () => {
     state.loadLimit += 30;
     refreshScheduleAndRender();
   });
 
   els.roomsList.addEventListener('click', (e) => {
+    const expandBtn = e.target.closest('[data-expand-access]');
+    if (expandBtn) {
+      setAccessFilter(expandBtn.dataset.expandAccess);
+      return;
+    }
+    const restoreBtn = e.target.closest('[data-restore-hidden]');
+    if (restoreBtn) {
+      state.hiddenIds.clear();
+      saveIdSet(HIDDEN_STORAGE_KEY, state.hiddenIds);
+      updateActiveFiltersBadge();
+      refreshScheduleAndRender();
+      return;
+    }
     const card = e.target.closest('[data-room-id]');
     if (card) openRoomDrawer(card.dataset.roomId);
+  });
+
+  els.drawerBody.addEventListener('click', (e) => {
+    const favBtn = e.target.closest('[data-toggle-fav]');
+    if (favBtn) {
+      const rid = favBtn.dataset.toggleFav;
+      if (state.favoriteIds.has(rid)) {
+        state.favoriteIds.delete(rid);
+      } else {
+        state.favoriteIds.add(rid);
+      }
+      saveIdSet(FAV_STORAGE_KEY, state.favoriteIds);
+      openRoomDrawer(rid);
+      refreshScheduleAndRender();
+      return;
+    }
+    const hideBtn = e.target.closest('[data-toggle-hide]');
+    if (hideBtn) {
+      const rid = hideBtn.dataset.toggleHide;
+      if (state.hiddenIds.has(rid)) {
+        state.hiddenIds.delete(rid);
+      } else {
+        state.hiddenIds.add(rid);
+      }
+      saveIdSet(HIDDEN_STORAGE_KEY, state.hiddenIds);
+      updateActiveFiltersBadge();
+      closeRoomDrawer();
+      refreshScheduleAndRender();
+    }
   });
   els.roomsList.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -944,6 +1085,8 @@ async function registerServiceWorker() {
 
 async function bootstrap() {
   initTheme();
+  state.favoriteIds = loadIdSet(FAV_STORAGE_KEY);
+  state.hiddenIds = loadIdSet(HIDDEN_STORAGE_KEY);
   restoreSavedLocation();
   setDateTimeFromOffset(0);
   updateLocationBadge();
